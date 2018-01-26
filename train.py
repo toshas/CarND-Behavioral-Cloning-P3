@@ -119,38 +119,38 @@ def createModel(kerasVer, rows, cols, chs):
         model.add(Cropping2D(cropping=((57,25), (1,1)), data_format='channels_last', input_shape=(rows, cols, chs)))
     #78x318x3
     model.add(Lambda(lambda x: x/127.5-1.0))
-    model.add(Convolution2D(32, 3, 3, activation='relu', bias=False))
-    #76x316x32
+    model.add(Convolution2D(16, 3, 3, activation='relu', bias=False))
+    #76x316x16
     model.add(MaxPooling2D((2,2)))
-    #38x158x32
+    #38x158x16
+    model.add(BatchNormalization(axis=3))
+    model.add(Convolution2D(32, 3, 3, activation='relu', bias=False))
+    #36x156x32
+    model.add(MaxPooling2D((2,2)))
+    #18x78x32
     model.add(BatchNormalization(axis=3))
     model.add(Convolution2D(64, 3, 3, activation='relu', bias=False))
-    #36x156x64
+    #16x76x64
     model.add(MaxPooling2D((2,2)))
-    #18x78x64
+    #8x38x64
     model.add(BatchNormalization(axis=3))
     model.add(Convolution2D(128, 3, 3, activation='relu', bias=False))
-    #16x76x128
+    #6x36x128
     model.add(MaxPooling2D((2,2)))
-    #8x38x128
+    #3x18x128
     model.add(BatchNormalization(axis=3))
     model.add(Convolution2D(256, 3, 3, activation='relu', bias=False))
-    #6x36x256
-    model.add(MaxPooling2D((2,2)))
-    #3x18x256
-    model.add(BatchNormalization(axis=3))
-    model.add(Convolution2D(1024, 3, 3, activation='relu', bias=False))
-    #1x16x1024
+    #1x16x256
     model.add(Flatten())
-    #16384
+    #4092
     model.add(BatchNormalization(mode=1, axis=1))
-    model.add(Dense(1024, activation='relu'))
+    model.add(Dense(256, activation='relu'))
     model.add(Dropout(0.5))
-    #1024
+    #256
     model.add(BatchNormalization(mode=1, axis=1))
-    model.add(Dense(64, activation='relu'))
+    model.add(Dense(32, activation='relu'))
     model.add(Dropout(0.5))
-    #64
+    #32
     model.add(Dense(1))
     return model
 
