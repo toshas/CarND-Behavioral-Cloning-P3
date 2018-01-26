@@ -22,7 +22,6 @@ from keras.callbacks import ModelCheckpoint
 
 DEF_DATA_DIR = './data'
 SIDEVIEW_DELTA_ANGLE = 0.2
-AUG_MULTIPLIER = 6
 
 def readImageRGB(path):
     #imread returns BGR
@@ -32,11 +31,13 @@ def trimSimulatorFilepath(path):
     parts = path.split('/')[-2:]
     return parts[0] + '/' + parts[1]
 
-def batchGenerator(samples, bAugment, batchSz, datadir):
+def batchGenerator(samples, bAugment, bUseRear, batchSz, datadir):
     nSamples = len(samples)
 
-    if bAugment:
-        batchSz //= AUG_MULTIPLIER
+    if bAugment and bUseRear:
+        batchSz //= 6
+    elif bAugment:
+        batchSz //= 2
     assert batchSz != 0
 
     while 1:
@@ -66,17 +67,18 @@ def batchGenerator(samples, bAugment, batchSz, datadir):
                     images.append(np.fliplr(imgCenter))
                     angles.append(-angleCenter)
 
-                    images.append(imgLeft)
-                    angles.append(angleLeft)
+                    if bUseRear:
+                        images.append(imgLeft)
+                        angles.append(angleLeft)
 
-                    images.append(np.fliplr(imgLeft))
-                    angles.append(-angleLeft)
+                        images.append(np.fliplr(imgLeft))
+                        angles.append(-angleLeft)
 
-                    images.append(imgRight)
-                    angles.append(angleRight)
+                        images.append(imgRight)
+                        angles.append(angleRight)
 
-                    images.append(np.fliplr(imgRight))
-                    angles.append(-angleRight)
+                        images.append(np.fliplr(imgRight))
+                        angles.append(-angleRight)
 
             X = np.array(images)
             y = np.array(angles)
@@ -162,8 +164,10 @@ def train(dirTrain, dirValid, batchSz, epochs, bResume=False):
     print('Training with {} training and {} validation samples, batch size {}, epochs {}'.format(len(telemetryTrainSamples), len(telemetryValidSamples), batchSz, epochs))
     assert len(telemetryTrainSamples) > 0 and len(telemetryValidSamples) > 0
 
-    trainGenerator = batchGenerator(telemetryTrainSamples, True, batchSz, dirTrain)
-    validGenerator = batchGenerator(telemetryValidSamples, False, batchSz, dirValid)
+    bAugment = True
+    bUseRear = False
+    trainGenerator = batchGenerator(telemetryTrainSamples, bAugment, bUseRear, batchSz, dirTrain)
+    validGenerator = batchGenerator(telemetryValidSamples, False, False, batchSz, dirValid)
 
     #TODO: remove these hardcodings, use tee(trainGenerator) and read the first image to get shape
     rows, cols, chs = 160, 320, 3
@@ -180,8 +184,13 @@ def train(dirTrain, dirValid, batchSz, epochs, bResume=False):
 
     model.compile(loss='mse', optimizer='adam')
 
+    samplesPerEpoch = len(telemetryTrainSamples)
+    if bAugment:
+        samplesPerEpoch *= 2
+        if bUseRear:
+            samplesPerEpoch *= 3
+
     checkpointer = ModelCheckpoint(filepath=modelFilename, verbose=1, save_best_only=True)
-    samplesPerEpoch = len(telemetryTrainSamples) * AUG_MULTIPLIER
     report = model.fit_generator(trainGenerator, samples_per_epoch=samplesPerEpoch, validation_data=validGenerator, \
                         nb_val_samples=len(telemetryValidSamples), nb_epoch=epochs, callbacks=[checkpointer])
 
