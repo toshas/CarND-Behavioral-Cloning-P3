@@ -1,23 +1,33 @@
 import os
 import csv
-from distutils.version import StrictVersion
+import argparse
 import cv2
 import numpy as np
 import pandas as pd
 import sklearn
+from distutils.version import StrictVersion
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
 from matplotlib import pyplot as plt
-import argparse
 
 import keras
 from keras.models import Sequential
-from keras.layers import Dense, Cropping2D, Lambda, Flatten
+from keras.layers import Dense, Cropping2D, Lambda, Flatten, Dropout, Convolution2D
+from keras.layers.normalization import BatchNormalization
+from keras.layers.pooling import MaxPooling2D
 from keras.callbacks import ModelCheckpoint
 
 DEF_DATA_DIR = './data'
 SIDEVIEW_DELTA_ANGLE = 0.2
 AUG_MULTIPLIER = 6
+
+def readImageRGB(path):
+    #imread returns BGR
+    return np.flip(cv2.imread(path), 2)
+
+def trimSimulatorFilepath(path):
+    parts = path.split('/')[-2:]
+    return parts[0] + '/' + parts[1]
 
 def batchGenerator(samples, bAugment, batchSz, datadir):
     nSamples = len(samples)
@@ -34,16 +44,16 @@ def batchGenerator(samples, bAugment, batchSz, datadir):
             images = []
             angles = []
             for batchSample in batchSamples:
-                pathCenter = datadir + '/' + batchSample[0]
+                pathCenter = datadir + '/' + trimSimulatorFilepath(batchSample[0])
                 if not os.path.exists(pathCenter):
-                    raise('Inconsistent dataset, {} is missing'.format(pathCenter))
+                    raise IOError('Inconsistent dataset, {} is missing'.format(pathCenter))
 
-                imgCenter = cv2.imread(datadir + '/' + batchSample[0])
-                imgLeft = cv2.imread(datadir + '/' + batchSample[1])
-                imgRight = cv2.imread(datadir + '/' + batchSample[2])
+                imgCenter = readImageRGB(pathCenter)
+                imgLeft = readImageRGB(datadir + '/' + trimSimulatorFilepath(batchSample[1]))
+                imgRight = readImageRGB(datadir + '/' + trimSimulatorFilepath(batchSample[2]))
                 angleCenter = float(batchSample[3])
-                angleLeft = angleCenter - SIDEVIEW_DELTA_ANGLE
-                angleRight = angleCenter + SIDEVIEW_DELTA_ANGLE
+                angleLeft = angleCenter + SIDEVIEW_DELTA_ANGLE
+                angleRight = angleCenter - SIDEVIEW_DELTA_ANGLE
 
                 images.append(imgCenter)
                 angles.append(angleCenter)
@@ -72,7 +82,7 @@ def batchGenerator(samples, bAugment, batchSz, datadir):
 def reconcileDataset(samples, datadir):
     cleanSamples = []
     for sample in samples:
-        pathCenter = datadir + '/' + sample[0]
+        pathCenter = datadir + '/' + trimSimulatorFilepath(sample[0])
         if not os.path.exists(pathCenter):
             print('Image for entry {} not found, skipping'.format(pathCenter))
             continue
@@ -82,7 +92,7 @@ def reconcileDataset(samples, datadir):
 def openTelemetry(datadir):
     filename = datadir + '/driving_log.csv'
     if not os.path.exists(filename):
-        raise('File could not be opened "{}"'.format(filename))
+        raise IOError('File could not be opened "{}"'.format(filename))
     samples = pd.read_csv(filename, sep='\s*,\s*', engine='python').values.tolist()
     return reconcileDataset(samples, datadir)
 
@@ -94,6 +104,51 @@ def openTelemetryTrainValidFromSingleDataset(datadir):
 def openTelemetryTrainValidFromDatasets(dirTrain, dirValid):
     return openSamples(dirTrain), openSamples(dirValid)
 
+def createModel(kerasVer, rows, cols, chs):
+    model = Sequential()
+
+    #160x320x3
+    if StrictVersion(kerasVer) <= StrictVersion('1.2.1'):
+        model.add(Cropping2D(cropping=((57,25), (1,1)), dim_ordering='tf', input_shape=(rows, cols, chs)))
+    else:
+        model.add(Cropping2D(cropping=((57,25), (1,1)), data_format='channels_last', input_shape=(rows, cols, chs)))
+    #78x318x3
+    model.add(Lambda(lambda x: x/127.5-1.0))
+    model.add(Convolution2D(32, 3, 3, activation='relu', bias=False))
+    #76x316x32
+    model.add(MaxPooling2D((2,2)))
+    #38x158x32
+    model.add(BatchNormalization(axis=3))
+    model.add(Convolution2D(64, 3, 3, activation='relu', bias=False))
+    #36x156x64
+    model.add(MaxPooling2D((2,2)))
+    #18x78x64
+    model.add(BatchNormalization(axis=3))
+    model.add(Convolution2D(128, 3, 3, activation='relu', bias=False))
+    #16x76x128
+    model.add(MaxPooling2D((2,2)))
+    #8x38x128
+    model.add(BatchNormalization(axis=3))
+    model.add(Convolution2D(256, 3, 3, activation='relu', bias=False))
+    #6x36x256
+    model.add(MaxPooling2D((2,2)))
+    #3x18x256
+    model.add(BatchNormalization(axis=3))
+    model.add(Convolution2D(1024, 3, 3, activation='relu', bias=False))
+    #1x16x1024
+    model.add(Flatten())
+    #16384
+    model.add(BatchNormalization(mode=1, axis=1))
+    model.add(Dense(1024, activation='relu'))
+    model.add(Dropout(0.5))
+    #1024
+    model.add(BatchNormalization(mode=1, axis=1))
+    model.add(Dense(64, activation='relu'))
+    model.add(Dropout(0.5))
+    #64
+    model.add(Dense(1))
+    return model
+
 def train(dirTrain, dirValid, batchSz, epochs, bResume=False):
     if dirValid is None:
         telemetryTrainSamples, telemetryValidSamples = openTelemetryTrainValidFromSingleDataset(dirTrain)
@@ -102,24 +157,18 @@ def train(dirTrain, dirValid, batchSz, epochs, bResume=False):
         telemetryTrainSamples, telemetryValidSamples = openTelemetryTrainValidFromDatasets(dirTrain, dirValid)
 
     print('Training with {} training and {} validation samples, batch size {}, epochs {}'.format(len(telemetryTrainSamples), len(telemetryValidSamples), batchSz, epochs))
+    assert len(telemetryTrainSamples) > 0 and len(telemetryValidSamples) > 0
 
     trainGenerator = batchGenerator(telemetryTrainSamples, True, batchSz, dirTrain)
     validGenerator = batchGenerator(telemetryValidSamples, False, batchSz, dirValid)
 
-    #TODO: remove these hardcodings, use tee(trainGenerator) and read the first image
+    #TODO: remove these hardcodings, use tee(trainGenerator) and read the first image to get shape
     rows, cols, chs = 160, 320, 3
 
     kerasVer = keras.__version__
     print('Keras version is {}'.format(keras.__version__))
 
-    model = Sequential()
-    if StrictVersion(kerasVer) <= StrictVersion('1.2.1'):
-        model.add(Cropping2D(cropping=((50,20), (0,0)), dim_ordering='tf', input_shape=(rows, cols, chs)))
-    else:
-        model.add(Cropping2D(cropping=((50,20), (0,0)), data_format='channels_last', input_shape=(rows, cols, chs)))
-    model.add(Lambda(lambda x: x/127.5-1.0))
-    model.add(Flatten())
-    model.add(Dense(1))
+    model = createModel(kerasVer, rows, cols, chs)
 
     modelFilename = 'model.h5'
     if os.path.exists(modelFilename) and bResume:
