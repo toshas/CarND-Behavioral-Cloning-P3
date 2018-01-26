@@ -8,7 +8,10 @@ import sklearn
 from distutils.version import StrictVersion
 from sklearn.model_selection import train_test_split
 from sklearn.utils import shuffle
+
+#AWS-friendly plotting
 from matplotlib import pyplot as plt
+plt.switch_backend('agg')
 
 import keras
 from keras.models import Sequential
@@ -197,5 +200,6 @@ parser.add_argument('-b', '--batch', type=int, default=36, dest='batch', help='B
 parser.add_argument('-e', '--epochs', type=int, default=3, dest='epochs', help='Number of epochs')
 args = parser.parse_args()
 
-train(args.train, args.valid, args.batch, args.epochs)
+with keras.backend.get_session():
+    train(args.train, args.valid, args.batch, args.epochs)
 
