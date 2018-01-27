@@ -53,11 +53,7 @@ def batchGenerator(samples, bAugment, bUseRear, batchSz, datadir):
                     raise IOError('Inconsistent dataset, {} is missing'.format(pathCenter))
 
                 imgCenter = readImageRGB(pathCenter)
-                imgLeft = readImageRGB(datadir + '/' + trimSimulatorFilepath(batchSample[1]))
-                imgRight = readImageRGB(datadir + '/' + trimSimulatorFilepath(batchSample[2]))
                 angleCenter = float(batchSample[3])
-                angleLeft = angleCenter + SIDEVIEW_DELTA_ANGLE
-                angleRight = angleCenter - SIDEVIEW_DELTA_ANGLE
 
                 images.append(imgCenter)
                 angles.append(angleCenter)
@@ -68,6 +64,12 @@ def batchGenerator(samples, bAugment, bUseRear, batchSz, datadir):
                     angles.append(-angleCenter)
 
                     if bUseRear:
+                        imgLeft = readImageRGB(datadir + '/' + trimSimulatorFilepath(batchSample[1]))
+                        imgRight = readImageRGB(datadir + '/' + trimSimulatorFilepath(batchSample[2]))
+
+                        angleLeft = angleCenter + SIDEVIEW_DELTA_ANGLE
+                        angleRight = angleCenter - SIDEVIEW_DELTA_ANGLE
+
                         images.append(imgLeft)
                         angles.append(angleLeft)
 
@@ -107,7 +109,7 @@ def openTelemetryTrainValidFromSingleDataset(datadir):
     return trainSamples, validSamples
 
 def openTelemetryTrainValidFromDatasets(dirTrain, dirValid):
-    return openSamples(dirTrain), openSamples(dirValid)
+    return openTelemetry(dirTrain), openTelemetry(dirValid)
 
 def createModel(kerasVer, rows, cols, chs):
     model = Sequential()
@@ -192,7 +194,7 @@ def train(dirTrain, dirValid, batchSz, epochs, bResume=False):
 
     checkpointer = ModelCheckpoint(filepath=modelFilename, verbose=1, save_best_only=True)
     report = model.fit_generator(trainGenerator, samples_per_epoch=samplesPerEpoch, validation_data=validGenerator, \
-                        nb_val_samples=len(telemetryValidSamples), nb_epoch=epochs, callbacks=[checkpointer])
+                    nb_val_samples=len(telemetryValidSamples), nb_epoch=epochs, callbacks=[checkpointer])
 
     plt.plot(report.history['loss'])
     plt.plot(report.history['val_loss'])
