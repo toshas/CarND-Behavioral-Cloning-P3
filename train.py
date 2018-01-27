@@ -167,7 +167,7 @@ def train(dirTrain, dirValid, batchSz, epochs, bResume=False):
     assert len(telemetryTrainSamples) > 0 and len(telemetryValidSamples) > 0
 
     bAugment = True
-    bUseRear = False
+    bUseRear = True
     trainGenerator = batchGenerator(telemetryTrainSamples, bAugment, bUseRear, batchSz, dirTrain)
     validGenerator = batchGenerator(telemetryValidSamples, False, False, batchSz, dirValid)
 
